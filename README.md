@@ -39,8 +39,8 @@ published on the remote host as `127.0.0.1:5760`. To connect QGroundControl
 from your workstation through SSH, run:
 
 ```bash
-ssh -N \\
-  -L 5760:127.0.0.1:5760 \\
+ssh -N \
+  -L 5760:127.0.0.1:5760 \
   user@remote-host
 ```
 
