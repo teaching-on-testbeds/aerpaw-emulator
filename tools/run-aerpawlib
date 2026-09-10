@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+if [ "$#" -lt 1 ]; then
+    echo "usage: run-aerpawlib <experiment-module> [experiment arguments...]" >&2
+    exit 2
+fi
+
+: "${MAVLINK_CONNECTION:?MAVLINK_CONNECTION is required}"
+: "${VEHICLE_TYPE:?VEHICLE_TYPE is required}"
+
+script=$1
+shift
+arm_connection=${AUTO_ARM_CONNECTION:-udp:0.0.0.0:14551}
+arm_timeout=${AUTO_ARM_TIMEOUT:-120}
+prearm_mode=""
+case "$VEHICLE_TYPE" in
+    drone) prearm_mode=STABILIZE ;;
+    rover) prearm_mode=MANUAL ;;
+esac
+
+if [ "${AUTO_ARM:-1}" = "1" ]; then
+    arm_args=(
+        python3 /opt/standalone/tools/auto_arm.py
+        --connect "$arm_connection"
+        --timeout "$arm_timeout"
+        --action arm
+    )
+    if [ -n "$prearm_mode" ]; then
+        arm_args+=(--mode "$prearm_mode")
+    fi
+    if ! "${arm_args[@]}"; then
+        echo "failed to arm the simulated vehicle" >&2
+        exit 1
+    fi
+fi
+
+python3 /opt/standalone/tools/experiment_runner.py \
+    --script "$script" \
+    --vehicle "$VEHICLE_TYPE" \
+    --connection "$MAVLINK_CONNECTION" \
+    "$@"
+status=$?
+
+if [ "${AUTO_ARM:-1}" = "1" ]; then
+    python3 /opt/standalone/tools/auto_arm.py \
+        --connect "$arm_connection" \
+        --timeout "$arm_timeout" \
+        --action disarm || true
+fi
+
+exit "$status"

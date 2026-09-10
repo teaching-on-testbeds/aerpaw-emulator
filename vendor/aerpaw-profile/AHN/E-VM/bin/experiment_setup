@@ -1,0 +1,1212 @@
+#!/usr/bin/env python3
+"""
+AERPAW Experiment Configurator
+Manages experiment configurations, profiles, and settings.
+"""
+
+import os
+import sys
+import shutil
+import subprocess
+import tarfile
+import json
+import traceback
+from pathlib import Path
+from datetime import datetime
+from dataclasses import dataclass, field
+from typing import Optional, List, Dict, Tuple
+
+
+@dataclass
+class Config:
+    # Git repository root (where profiles are tracked)
+    repo_root: Path = Path("/root/AERPAW-Dev")
+
+    profiles_rel_path: str = "AHN/E-VM/Profile_software/ProfileScripts"
+    vehicle_control_rel_path: str = "AHN/E-VM/Profile_software/vehicle_control"
+
+    # Sample directories
+    radio_samples_dir: Path = Path("/root/Profiles/ProfileScripts/Radio/Samples")
+    vehicle_samples_dir: Path = Path("/root/Profiles/ProfileScripts/Vehicle/Samples")
+    traffic_samples_dir: Path = Path("/root/Profiles/ProfileScripts/Traffic/Samples")
+
+    # Target directories
+    radio_target_dir: Path = Path("/root/Profiles/ProfileScripts/Radio")
+    vehicle_target_dir: Path = Path("/root/Profiles/ProfileScripts/Vehicle")
+    traffic_target_dir: Path = Path("/root/Profiles/ProfileScripts/Traffic")
+
+    # Helper directories
+    radio_helpers_dir: Path = Path("/root/Profiles/ProfileScripts/Radio/Helpers")
+    vehicle_helpers_dir: Path = Path("/root/Profiles/ProfileScripts/Vehicle/Helpers")
+    traffic_helpers_dir: Path = Path("/root/Profiles/ProfileScripts/Traffic/Helpers")
+
+    radio_script_path: str = "./Radio/startRadio.sh"
+    vehicle_script_path: str = "./Vehicle/startVehicle.sh"
+    traffic_script_path: str = "./Traffic/startTraffic.sh"
+
+    start_experiment_script: Path = Path("/root/startexperiment.sh")
+
+    # Vehicle missions
+    vehicle_missions_dir: Path = Path(
+        "/root/Profiles/vehicle_control/PreplannedTrajectory/Missions"
+    )
+
+    # Profile management
+    profiles_dir: Path = Path.home() / ".aerpaw" / "profiles"
+    exports_dir: Path = Path.home() / ".aerpaw" / "exports"
+
+    # Directories to track for git diff (relative to repo root)
+    tracked_dirs: Tuple[str, ...] = field(
+        default_factory=lambda: (
+            "AHN/E-VM/Profile_software/ProfileScripts/Radio",
+            "AHN/E-VM/Profile_software/ProfileScripts/Vehicle",
+            "AHN/E-VM/Profile_software/ProfileScripts/Traffic",
+            "AHN/E-VM/Profile_software/vehicle_control/PreplannedTrajectory/Missions",
+        )
+    )
+
+
+class Colors:
+    RED = "\033[0;31m"
+    GREEN = "\033[0;32m"
+    YELLOW = "\033[1;33m"
+    BLUE = "\033[0;34m"
+    CYAN = "\033[0;36m"
+    RESET = "\033[0m"
+
+    @classmethod
+    def red(cls, text: str) -> str:
+        return f"{cls.RED}{text}{cls.RESET}"
+
+    @classmethod
+    def green(cls, text: str) -> str:
+        return f"{cls.GREEN}{text}{cls.RESET}"
+
+    @classmethod
+    def yellow(cls, text: str) -> str:
+        return f"{cls.YELLOW}{text}{cls.RESET}"
+
+    @classmethod
+    def cyan(cls, text: str) -> str:
+        return f"{cls.CYAN}{text}{cls.RESET}"
+
+
+class GitManager:
+    def __init__(self, config: Config):
+        self.config = config
+        self.repo_root = config.repo_root
+
+    def _run_git(
+        self, *args, capture_output: bool = True
+    ) -> subprocess.CompletedProcess:
+        cmd = ["git", "-C", str(self.repo_root)] + list(args)
+        return subprocess.run(cmd, capture_output=capture_output, text=True)
+
+    def is_repo(self) -> bool:
+        result = self._run_git("rev-parse", "--git-dir")
+        return result.returncode == 0
+
+    def get_diff(self, paths: Optional[List[str]] = None) -> str:
+        if paths is None:
+            paths = list(self.config.tracked_dirs)
+
+        result = self._run_git("diff", "HEAD", "--", *paths)
+        return result.stdout
+
+    def get_status(self, paths: Optional[List[str]] = None) -> Dict[str, List[str]]:
+        if paths is None:
+            paths = list(self.config.tracked_dirs)
+
+        status = {"modified": [], "untracked": [], "deleted": [], "added": []}
+
+        result = self._run_git("status", "--porcelain", "--", *paths)
+
+        for line in result.stdout.splitlines():
+            if len(line) < 3:
+                continue
+            code = line[:2]
+            filepath = line[3:]
+
+            if code == "??":
+                status["untracked"].append(filepath)
+            elif code[0] == "M" or code[1] == "M":
+                status["modified"].append(filepath)
+            elif code[0] == "D" or code[1] == "D":
+                status["deleted"].append(filepath)
+            elif code[0] == "A":
+                status["added"].append(filepath)
+
+        return status
+
+    def get_untracked_files(self, paths: Optional[List[str]] = None) -> List[str]:
+        if paths is None:
+            paths = list(self.config.tracked_dirs)
+
+        result = self._run_git(
+            "ls-files", "--others", "--exclude-standard", "--", *paths
+        )
+        return [f for f in result.stdout.splitlines() if f]
+
+    def apply_diff(self, diff_content: str) -> bool:
+        if not diff_content.strip():
+            return True
+
+        result = subprocess.run(
+            ["git", "-C", str(self.repo_root), "apply", "--3way", "-"],
+            input=diff_content,
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode == 0
+
+    def reset_paths(self, paths: Optional[List[str]] = None) -> bool:
+        """Reset tracked directories to HEAD state."""
+        if paths is None:
+            paths = list(self.config.tracked_dirs)
+
+        result = self._run_git("checkout", "HEAD", "--", *paths)
+
+        for path in paths:
+            full_path = self.repo_root / path
+            if full_path.exists():
+                self._run_git("clean", "-fd", "--", path)
+
+        return result.returncode == 0
+
+    def get_current_branch(self) -> str:
+        result = self._run_git("rev-parse", "--abbrev-ref", "HEAD")
+        return result.stdout.strip()
+
+    def get_current_commit(self) -> str:
+        result = self._run_git("rev-parse", "HEAD")
+        return result.stdout.strip()
+
+
+class ExperimentManager:
+    def __init__(self, config: Config):
+        self.config = config
+
+    def _normalize_script_content(self, content: str) -> str:
+        return "\n".join(line.rstrip() for line in content.splitlines()).strip()
+
+    def _find_matching_sample(
+        self, samples_dir: Path, start_script_path: Path
+    ) -> Optional[str]:
+        if not start_script_path.exists():
+            return None
+
+        try:
+            start_content = self._normalize_script_content(
+                start_script_path.read_text()
+            )
+        except Exception:
+            return None
+
+        if not start_content:
+            return "empty"
+
+        try:
+            for sample in samples_dir.rglob("*.sh"):
+                if not sample.is_file():
+                    continue
+                try:
+                    sample_content = self._normalize_script_content(
+                        sample.read_text()
+                    )
+                except Exception:
+                    continue
+                if start_content == sample_content:
+                    return str(sample.relative_to(samples_dir))
+        except Exception:
+            return None
+
+        return "custom/modified"
+
+    def get_selected_script_label(
+        self, samples_dir: Path, target_dir: Path, start_script_name: str
+    ) -> str:
+        start_script = target_dir / start_script_name
+        if not start_script.exists():
+            return "not configured"
+
+        match = self._find_matching_sample(samples_dir, start_script)
+        if match is None:
+            return "unknown"
+        return match
+
+    def check_script_status(self, script_name: str, script_path: str) -> int:
+        """
+        Check if a script is enabled/disabled in startexperiment.sh.
+        Returns: 0=enabled, 1=disabled, 2=not found
+        """
+        if not self.config.start_experiment_script.exists():
+            return 2
+
+        content = self.config.start_experiment_script.read_text()
+        for line in content.splitlines():
+            if script_path in line:
+                if line.strip().startswith("#"):
+                    return 1  # Disabled
+                return 0  # Enabled
+        return 2  # Not found
+
+    def display_experiment_status(self):
+        print(Colors.cyan("Current Experiment Script Status:"))
+
+        scripts = [
+            ("Radio", self.config.radio_script_path),
+            ("Vehicle", self.config.vehicle_script_path),
+            ("Traffic", self.config.traffic_script_path),
+        ]
+
+        for name, path in scripts:
+            status = self.check_script_status(name, path)
+            if name == "Radio":
+                selected = self.get_selected_script_label(
+                    self.config.radio_samples_dir,
+                    self.config.radio_target_dir,
+                    "startRadio.sh",
+                )
+            elif name == "Vehicle":
+                selected = self.get_selected_script_label(
+                    self.config.vehicle_samples_dir,
+                    self.config.vehicle_target_dir,
+                    "startVehicle.sh",
+                )
+            else:
+                selected = self.get_selected_script_label(
+                    self.config.traffic_samples_dir,
+                    self.config.traffic_target_dir,
+                    "startTraffic.sh",
+                )
+
+            if status == 0:
+                print(Colors.green(f"[✔] {name} script is enabled"))
+            elif status == 1:
+                print(Colors.red(f"[X] {name} script is disabled"))
+            else:
+                print(
+                    Colors.red(f"[X] {name} script is not found in the startup script")
+                )
+            print(Colors.cyan(f"    Selected: {selected}"))
+        print()
+
+    def setup_experiment(
+        self,
+        experiment_script: str,
+        experiment_name: str,
+        samples_dir: Path,
+        target_dir: Path,
+        start_script_name: str,
+    ):
+        source = samples_dir / experiment_script
+        target = target_dir / start_script_name
+
+        try:
+            shutil.copy2(source, target)
+
+            # Enable the script in startexperiment.sh
+            if self.config.start_experiment_script.exists():
+                content = self.config.start_experiment_script.read_text()
+                script_rel_path = f"./{target_dir.name}/{start_script_name}"
+                new_content = content.replace(f"#{script_rel_path}", script_rel_path)
+                self.config.start_experiment_script.write_text(new_content)
+
+            print(Colors.green(f"{experiment_name} has been configured successfully."))
+        except Exception as e:
+            print(Colors.red(f"Error setting up experiment: {e}"))
+
+    def get_node_info(self) -> Dict[str, str]:
+        node_type = os.environ.get("AP_EXPENV_THIS_CONTAINER_NODE_TYPE", "unknown")
+        node_location = "unknown"
+
+        if node_type == "Portable":
+            node_location = "Dronepad"
+        elif node_type == "Fixed":
+            nodes = os.environ.get("AP_EXPENV_SET_NODES", "").split()
+            node_num_str = os.environ.get("AP_EXPENV_THIS_CONTAINER_EXP_NODE_NUM", "0")
+            try:
+                node_num = int(node_num_str) - 1
+                if 0 <= node_num < len(nodes):
+                    node_location = nodes[node_num]
+            except ValueError:
+                pass
+
+        return {"type": node_type, "location": node_location}
+
+
+class ProfileManager:
+    def __init__(self, config: Config):
+        self.config = config
+        self.git = GitManager(config)
+        self._init_dirs()
+
+    def _init_dirs(self):
+        self.config.profiles_dir.mkdir(parents=True, exist_ok=True)
+        self.config.exports_dir.mkdir(parents=True, exist_ok=True)
+
+    def list_profiles(self) -> List[str]:
+        profiles = []
+        if self.config.profiles_dir.exists():
+            for p in self.config.profiles_dir.iterdir():
+                if p.is_dir():
+                    profiles.append(p.name)
+        return sorted(profiles)
+
+    def get_profile_metadata(self, profile_name: str) -> Dict[str, str]:
+        meta_file = self.config.profiles_dir / profile_name / "profile.json"
+        metadata = {
+            "created_at": "unknown",
+            "node_type": "unknown",
+            "method": "unknown",
+        }
+
+        if meta_file.exists():
+            try:
+                metadata = json.loads(meta_file.read_text())
+            except Exception:
+                pass
+        return metadata
+
+    def save_profile(self, profile_name: str) -> bool:
+        # Sanitize profile name
+        profile_name = "".join(c for c in profile_name if c.isalnum() or c in "_-")
+        if not profile_name:
+            print(Colors.red("Profile name cannot be empty."))
+            return False
+
+        profile_path = self.config.profiles_dir / profile_name
+
+        if profile_path.exists():
+            response = input(
+                Colors.yellow(
+                    f"Profile '{profile_name}' already exists. Overwrite? (y/n): "
+                )
+            )
+            if response.lower() != "y":
+                print(Colors.cyan("Save cancelled."))
+                return False
+            shutil.rmtree(profile_path)
+
+        try:
+            profile_path.mkdir(parents=True, exist_ok=True)
+
+            use_git = self.git.is_repo()
+
+            if use_git:
+                diff = self.git.get_diff()
+                if diff:
+                    (profile_path / "changes.diff").write_text(diff)
+
+                untracked = self.git.get_untracked_files()
+                untracked_dir = profile_path / "untracked"
+
+                for rel_path in untracked:
+                    src = self.config.repo_root / rel_path
+                    if src.exists() and src.is_file():
+                        dest = untracked_dir / rel_path
+                        dest.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(src, dest)
+
+                git_info = {
+                    "branch": self.git.get_current_branch(),
+                    "commit": self.git.get_current_commit(),
+                }
+            else:
+                git_info = None
+                self._copy_experiment_files(profile_path / "files")
+
+            if self.config.start_experiment_script.exists():
+                shutil.copy2(
+                    self.config.start_experiment_script,
+                    profile_path / "startexperiment.sh",
+                )
+
+            node_info = ExperimentManager(self.config).get_node_info()
+            metadata = {
+                "profile_name": profile_name,
+                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "node_type": node_info["type"],
+                "method": "git_diff" if use_git else "file_copy",
+                "git_info": git_info,
+            }
+            (profile_path / "profile.json").write_text(json.dumps(metadata, indent=2))
+
+            print(Colors.green(f"Profile '{profile_name}' saved successfully!"))
+            if use_git:
+                status = self.git.get_status()
+                total_changes = sum(len(v) for v in status.values())
+                print(
+                    Colors.cyan(
+                        f"  Method: git diff ({total_changes} file changes tracked)"
+                    )
+                )
+            else:
+                print(Colors.cyan("  Method: file copy (git not available)"))
+
+            return True
+
+        except Exception as e:
+            print(Colors.red(f"Error saving profile: {e}"))
+
+            traceback.print_exc()
+            return False
+
+    def _copy_experiment_files(self, dest_dir: Path):
+        """Fallback: copy experiment files directly (when git not available)."""
+        dest_dir.mkdir(parents=True, exist_ok=True)
+
+        dirs_to_copy = [
+            (self.config.radio_target_dir, "Radio"),
+            (self.config.vehicle_target_dir, "Vehicle"),
+            (self.config.traffic_target_dir, "Traffic"),
+        ]
+
+        for src_dir, name in dirs_to_copy:
+            if src_dir.exists():
+                dest = dest_dir / name
+                # Copy start script
+                start_script = src_dir / f"start{name}.sh"
+                if start_script.exists():
+                    dest.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(start_script, dest)
+
+                # Copy helper scripts
+                helpers_dir = src_dir / "Helpers"
+                if helpers_dir.exists():
+                    shutil.copytree(helpers_dir, dest / "Helpers", dirs_exist_ok=True)
+
+        # Copy vehicle missions
+        if self.config.vehicle_missions_dir.exists():
+            missions_dest = dest_dir / "Missions"
+            missions_dest.mkdir(parents=True, exist_ok=True)
+            for plan in self.config.vehicle_missions_dir.glob("*.plan"):
+                if plan.is_file():
+                    shutil.copy2(plan, missions_dest)
+
+    def restore_profile(self, profile_name: str) -> bool:
+        profile_path = self.config.profiles_dir / profile_name
+
+        if not profile_path.exists():
+            print(Colors.red(f"Profile '{profile_name}' not found."))
+            return False
+
+        try:
+            metadata = json.loads((profile_path / "profile.json").read_text())
+            method = metadata.get("method", "file_copy")
+
+            if method == "git_diff" and self.git.is_repo():
+                print(Colors.cyan("Resetting to clean state..."))
+                self.git.reset_paths()
+
+                # Apply the diff
+                diff_file = profile_path / "changes.diff"
+                if diff_file.exists():
+                    diff_content = diff_file.read_text()
+                    if diff_content.strip():
+                        print(Colors.cyan("Applying saved changes..."))
+                        if not self.git.apply_diff(diff_content):
+                            print(
+                                Colors.yellow(
+                                    "Warning: Some changes could not be applied cleanly."
+                                )
+                            )
+
+                # Restore untracked files
+                untracked_dir = profile_path / "untracked"
+                if untracked_dir.exists():
+                    print(Colors.cyan("Restoring additional files..."))
+                    for src in untracked_dir.rglob("*"):
+                        if src.is_file():
+                            rel_path = src.relative_to(untracked_dir)
+                            dest = self.config.repo_root / rel_path
+                            dest.parent.mkdir(parents=True, exist_ok=True)
+                            shutil.copy2(src, dest)
+            else:
+                # File copy method
+                files_dir = profile_path / "files"
+                if files_dir.exists():
+                    self._restore_experiment_files(files_dir)
+
+            start_exp = profile_path / "startexperiment.sh"
+            if start_exp.exists():
+                shutil.copy2(start_exp, self.config.start_experiment_script)
+
+            print(Colors.green(f"Profile '{profile_name}' restored successfully."))
+            return True
+
+        except Exception as e:
+            print(Colors.red(f"Error restoring profile: {e}"))
+
+            traceback.print_exc()
+            return False
+
+    def _restore_experiment_files(self, src_dir: Path):
+        for name, target_dir in [
+            ("Radio", self.config.radio_target_dir),
+            ("Vehicle", self.config.vehicle_target_dir),
+            ("Traffic", self.config.traffic_target_dir),
+        ]:
+            src = src_dir / name
+            if src.exists():
+                for f in src.rglob("*"):
+                    if f.is_file():
+                        rel = f.relative_to(src)
+                        dest = target_dir / rel
+                        dest.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(f, dest)
+
+        missions_src = src_dir / "Missions"
+        if missions_src.exists() and self.config.vehicle_missions_dir.exists():
+            for plan in missions_src.glob("*.plan"):
+                shutil.copy2(plan, self.config.vehicle_missions_dir)
+
+    def delete_profile(self, profile_name: str) -> bool:
+        profile_path = self.config.profiles_dir / profile_name
+
+        if not profile_path.exists():
+            print(Colors.red(f"Profile '{profile_name}' not found."))
+            return False
+
+        try:
+            shutil.rmtree(profile_path)
+            print(Colors.green(f"Profile '{profile_name}' deleted successfully."))
+            return True
+        except Exception as e:
+            print(Colors.red(f"Error deleting profile: {e}"))
+            return False
+
+    def export_profile(self, profile_name: str) -> Optional[Path]:
+        profile_path = self.config.profiles_dir / profile_name
+
+        if not profile_path.exists():
+            print(Colors.red(f"Profile '{profile_name}' not found."))
+            return None
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        export_file = self.config.exports_dir / f"{profile_name}_{timestamp}.tar.gz"
+
+        try:
+            with tarfile.open(export_file, "w:gz") as tar:
+                tar.add(profile_path, arcname=profile_name)
+
+            print(Colors.green(f"Profile exported successfully!"))
+            print(Colors.cyan(f"Export file: {export_file}"))
+            return export_file
+
+        except Exception as e:
+            print(Colors.red(f"Error exporting profile: {e}"))
+            return None
+
+    def import_profile(self, import_file: Path) -> bool:
+        if not import_file.exists():
+            print(Colors.red(f"File not found: {import_file}"))
+            return False
+
+        try:
+            with tarfile.open(import_file, "r:gz") as tar:
+                tar.extractall(path=self.config.profiles_dir)
+
+            print(Colors.green("Profile imported successfully!"))
+            return True
+
+        except Exception as e:
+            print(Colors.red(f"Error importing profile: {e}"))
+            return False
+
+    def list_exports(self) -> List[Path]:
+        exports = []
+        if self.config.exports_dir.exists():
+            exports = list(self.config.exports_dir.glob("*.tar.gz"))
+        return sorted(exports)
+
+    def reset_to_fresh_state(self) -> bool:
+        try:
+            if self.git.is_repo():
+                print(Colors.cyan("Resetting tracked directories via git..."))
+                self.git.reset_paths()
+            else:
+                for script in [
+                    self.config.radio_target_dir / "startRadio.sh",
+                    self.config.vehicle_target_dir / "startVehicle.sh",
+                    self.config.traffic_target_dir / "startTraffic.sh",
+                ]:
+                    if script.exists():
+                        script.unlink()
+
+            # Disable all scripts in startexperiment.sh
+            if self.config.start_experiment_script.exists():
+                content = self.config.start_experiment_script.read_text()
+                for path in [
+                    self.config.radio_script_path,
+                    self.config.vehicle_script_path,
+                    self.config.traffic_script_path,
+                ]:
+                    lines = content.splitlines()
+                    new_lines = []
+                    for line in lines:
+                        if path in line and not line.strip().startswith("#"):
+                            new_lines.append("#" + line)
+                        else:
+                            new_lines.append(line)
+                    content = "\n".join(new_lines)
+                self.config.start_experiment_script.write_text(content)
+
+            print(Colors.green("Experiment has been reset to fresh state."))
+            return True
+
+        except Exception as e:
+            print(Colors.red(f"Error resetting to fresh state: {e}"))
+            return False
+
+    def show_current_changes(self):
+        if not self.git.is_repo():
+            print(Colors.yellow("Git repository not available. Cannot show diff."))
+            return
+
+        status = self.git.get_status()
+
+        print(Colors.cyan("Current Changes from Base State:"))
+        print()
+
+        if status["modified"]:
+            print(Colors.yellow("Modified files:"))
+            for f in status["modified"]:
+                print(f"  M {f}")
+
+        if status["added"]:
+            print(Colors.green("Added files:"))
+            for f in status["added"]:
+                print(f"  A {f}")
+
+        if status["untracked"]:
+            print(Colors.cyan("New (untracked) files:"))
+            for f in status["untracked"]:
+                print(f"  ? {f}")
+
+        if status["deleted"]:
+            print(Colors.red("Deleted files:"))
+            for f in status["deleted"]:
+                print(f"  D {f}")
+
+        total = sum(len(v) for v in status.values())
+        if total == 0:
+            print(Colors.green("No changes from base state."))
+        else:
+            print()
+            print(f"Total: {total} file(s) changed")
+
+
+class Menu:
+    def __init__(self, config: Config):
+        self.config = config
+        self.exp_manager = ExperimentManager(config)
+        self.profile_manager = ProfileManager(config)
+
+    def clear_screen(self):
+        os.system("clear" if os.name == "posix" else "cls")
+
+    def display_banner(self):
+        print(
+            Colors.green(
+                """
+     ▗▄▖ ▗▄▄▄▖▗▄▄▖ ▗▄▄▖  ▗▄▖ ▗▖ ▗▖
+    ▐▌ ▐▌▐▌   ▐▌ ▐▌▐▌ ▐▌▐▌ ▐▌▐▌ ▐▌
+    ▐▛▀▜▌▐▛▀▀▘▐▛▀▚▖▐▛▀▘ ▐▛▀▜▌▐▌ ▐▌
+    ▐▌ ▐▌▐▙▄▄▖▐▌ ▐▌▐▌   ▐▌ ▐▌▐▙█▟▌
+                                  
+       Experiment Configurator    
+"""
+            )
+        )
+        node_info = self.exp_manager.get_node_info()
+        print(Colors.cyan("Node Info:"))
+        print(f"   {Colors.green('Node Type:')} {node_info['type']}")
+        print(f"   {Colors.green('Node Location:')} {node_info['location']}")
+        print()
+
+    def refresh_screen(self):
+        self.clear_screen()
+        self.display_banner()
+        self.exp_manager.display_experiment_status()
+
+    def get_choice(self, prompt: str, valid_range: range) -> int:
+        while True:
+            try:
+                choice = input(prompt)
+                if choice == "":
+                    continue
+                num = int(choice)
+                if num in valid_range:
+                    return num
+                print(
+                    Colors.red(
+                        f"Invalid choice. Please select {valid_range.start}-{valid_range.stop - 1}."
+                    )
+                )
+            except ValueError:
+                print(Colors.red("Please enter a number."))
+
+    def select_from_list(self, items: List[str], prompt: str) -> Optional[int]:
+        if not items:
+            return None
+
+        for i, item in enumerate(items, 1):
+            print(Colors.yellow(f"{i}) {item}"))
+        print(Colors.yellow("0) Cancel"))
+
+        choice = self.get_choice(prompt, range(0, len(items) + 1))
+        if choice == 0:
+            return None
+        return choice - 1
+
+    def pause(self):
+        input("Press Enter to continue...")
+
+
+    RADIO_EXPERIMENTS = [
+        (
+            "SE1: Multi-Node LTE SISO",
+            [
+                ("EPC and eNB", "startSRSRAN-SISO-EPCandENB.sh"),
+                ("UE", "startSRSRAN-SISO-UE.sh"),
+            ],
+        ),
+        (
+            "SE2: LTE Cell Scan",
+            [
+                ("Transmitter (TX)", "startSRSCellScan-TX.sh"),
+                ("Receiver (RX)", "startSRSCellScan-RX.sh"),
+            ],
+        ),
+        (
+            "SE3: Two-Node LTE MIMO",
+            [
+                ("eNB", "startSRSRAN-MIMO-EPCandENB.sh"),
+                ("UE", "startSRSRAN-MIMO-UE.sh"),
+            ],
+        ),
+        (
+            "SE4: Multi-Node IoT",
+            [
+                ("eNB", "startSRSRAN-IoT-ENB.sh"),
+                ("UE", "startSRSRAN-IoT-UE.sh"),
+            ],
+        ),
+        (
+            "SE5: Multi-Node LTE Handover",
+            [
+                ("Open5GS EPC", "startOpen5GS_HO.sh"),
+                ("eNB 1", "startSRSRAN-Handover-ENB-1.sh"),
+                ("eNB 2", "startSRSRAN-Handover-ENB-2.sh"),
+                ("eNB 3", "startSRSRAN-Handover-ENB-3.sh"),
+                ("eNB 4", "startSRSRAN-Handover-ENB-4.sh"),
+                ("eNB 5", "startSRSRAN-Handover-ENB-5.sh"),
+                ("UE", "startSRSRAN-Handover-UE.sh"),
+            ],
+        ),
+        (
+            "SE6: Single-Node 5G SA",
+            [
+                ("gNB", "startSRSRAN-5G-SISO-GNB.sh"),
+                ("UE", "startSRSRAN-5G-SISO-UE.sh"),
+            ],
+        ),
+        (
+            "OE1: Two-Node LTE SISO (OAI)",
+            [
+                ("EPC and eNB", "_deprecated/startOAI-SISO-EPCandENB.sh"),
+                ("UE", "_deprecated/startOAI-SISO-UE.sh"),
+            ],
+        ),
+        (
+            "OE2: 5G Standalone (OAI)",
+            [
+                ("gNB", "startOpen5GS-OAI-gNB.sh"),
+                ("UE", "startOpen5GS-OAI-UE.sh"),
+            ],
+        ),
+        (
+            "GE1: OFDM TX-RX (GNU Radio)",
+            [
+                ("Transmitter", "startGNURadio-OFDM-TX.sh"),
+                ("Receiver", "startGNURadio-OFDM-RX.sh"),
+            ],
+        ),
+        (
+            "GE2: Channel Sounder (GNU Radio)",
+            [
+                ("Transmitter", "startGNURadio-ChannelSounder-TX.sh"),
+                ("Receiver", "startGNURadio-ChannelSounder-RX.sh"),
+            ],
+        ),
+        (
+            "GE3: LoRa PHY TX-RX (GNU Radio)",
+            [
+                ("Transmitter", "loraGNURadio-TX.sh"),
+                ("Receiver", "loraGNURadio-RX.sh"),
+            ],
+        ),
+        ("UHD1: Spectrum Monitoring", None, "startSpectrumMonitoring.sh"),
+        ("UHD2: IQ Collection", None, "startIQCollection.sh"),
+    ]
+
+    def run_radio_menu(self):
+        while True:
+            self.refresh_screen()
+            print(Colors.cyan("Select a radio experiment to configure:"))
+
+            for i, exp in enumerate(self.RADIO_EXPERIMENTS, 1):
+                print(Colors.yellow(f"{i:2}) {exp[0]}"))
+            print(Colors.yellow(" 0) Back to Main Menu"))
+
+            max_choice = len(self.RADIO_EXPERIMENTS)
+            choice = self.get_choice(
+                f"Enter your choice [0-{max_choice}]: ", range(0, max_choice + 1)
+            )
+
+            if choice == 0:
+                break
+
+            exp = self.RADIO_EXPERIMENTS[choice - 1]
+            exp_name = exp[0]
+
+            if len(exp) == 3:
+                self.exp_manager.setup_experiment(
+                    exp[2],
+                    exp_name,
+                    self.config.radio_samples_dir,
+                    self.config.radio_target_dir,
+                    "startRadio.sh",
+                )
+            else:
+                # Has sub-options
+                print(Colors.cyan(f"Select component to set up for {exp_name}:"))
+                for i, (opt_name, _) in enumerate(exp[1], 1):
+                    print(Colors.yellow(f"{i}) {opt_name}"))
+
+                sub_choice = self.get_choice(
+                    f"Enter your choice [1-{len(exp[1])}]: ", range(1, len(exp[1]) + 1)
+                )
+                opt_name, script = exp[1][sub_choice - 1]
+                self.exp_manager.setup_experiment(
+                    script,
+                    f"{exp_name} ({opt_name})",
+                    self.config.radio_samples_dir,
+                    self.config.radio_target_dir,
+                    "startRadio.sh",
+                )
+
+    VEHICLE_EXPERIMENTS = [
+        ("VE1: Pre-planned Trajectory", "startPreplannedTrajectory.sh"),
+        ("VE2: GPS Logger", "startGPSLogger.sh"),
+        ("VE3: Multiple Vehicle Coordination", "startHideRover.sh"),
+        ("VE4: Autonomous Vehicle Control", "startRoverSearch.sh"),
+        ("VE5: Replay Mission", "startReplayMission.sh"),
+    ]
+
+    def run_vehicle_menu(self):
+        """Vehicle experiments menu."""
+        while True:
+            self.refresh_screen()
+            print(Colors.cyan("Select a vehicle experiment to configure:"))
+
+            for i, (name, _) in enumerate(self.VEHICLE_EXPERIMENTS, 1):
+                print(Colors.yellow(f"{i}) {name}"))
+            print(Colors.yellow("0) Back to Main Menu"))
+
+            choice = self.get_choice("Enter your choice [0-5]: ", range(0, 6))
+
+            if choice == 0:
+                break
+
+            name, script = self.VEHICLE_EXPERIMENTS[choice - 1]
+            self.exp_manager.setup_experiment(
+                script,
+                name,
+                self.config.vehicle_samples_dir,
+                self.config.vehicle_target_dir,
+                "startVehicle.sh",
+            )
+
+    TRAFFIC_EXPERIMENTS = [
+        ("Ping", None, "startPing.sh"),
+        (
+            "iPerf",
+            [
+                ("Server", "startIperfServer.sh"),
+                ("Client", "startIperfClient.sh"),
+            ],
+        ),
+        (
+            "MGEN",
+            [
+                ("Server", "startMgenRx.sh"),
+                ("Client", "startMgenTx.sh"),
+            ],
+        ),
+    ]
+
+    def run_traffic_menu(self):
+        while True:
+            self.refresh_screen()
+            print(Colors.cyan("Select a traffic experiment to configure:"))
+
+            for i, exp in enumerate(self.TRAFFIC_EXPERIMENTS, 1):
+                print(Colors.yellow(f"{i}) {exp[0]}"))
+            print(Colors.yellow("0) Back to Main Menu"))
+
+            choice = self.get_choice("Enter your choice [0-3]: ", range(0, 4))
+
+            if choice == 0:
+                break
+
+            exp = self.TRAFFIC_EXPERIMENTS[choice - 1]
+
+            if len(exp) == 3:
+                self.exp_manager.setup_experiment(
+                    exp[2],
+                    exp[0],
+                    self.config.traffic_samples_dir,
+                    self.config.traffic_target_dir,
+                    "startTraffic.sh",
+                )
+            else:
+                # Has sub-options
+                print(Colors.cyan(f"Select component to set up for {exp[0]}:"))
+                for i, (opt_name, _) in enumerate(exp[1], 1):
+                    print(Colors.yellow(f"{i}) {opt_name}"))
+
+                sub_choice = self.get_choice(
+                    f"Enter your choice [1-{len(exp[1])}]: ", range(1, len(exp[1]) + 1)
+                )
+                opt_name, script = exp[1][sub_choice - 1]
+                self.exp_manager.setup_experiment(
+                    script,
+                    f"{exp[0]} ({opt_name})",
+                    self.config.traffic_samples_dir,
+                    self.config.traffic_target_dir,
+                    "startTraffic.sh",
+                )
+
+    def run_profile_menu(self):
+        while True:
+            self.refresh_screen()
+            print(Colors.cyan("Experiment Profile Management:"))
+            print(Colors.yellow("1) Save Current Configuration as Profile"))
+            print(Colors.yellow("2) List Saved Profiles"))
+            print(Colors.yellow("3) Restore Profile"))
+            print(Colors.yellow("4) Delete Profile"))
+            print(Colors.yellow("5) Export Profile to File"))
+            print(Colors.yellow("6) Import Profile from File"))
+            print(Colors.yellow("7) Reset to Fresh State"))
+            print(Colors.yellow("8) Show Current Changes"))
+            print(Colors.yellow("0) Back to Main Menu"))
+
+            choice = self.get_choice("Enter your choice [0-8]: ", range(0, 9))
+
+            if choice == 0:
+                break
+            elif choice == 1:
+                self._save_profile()
+            elif choice == 2:
+                self._list_profiles()
+            elif choice == 3:
+                self._restore_profile()
+            elif choice == 4:
+                self._delete_profile()
+            elif choice == 5:
+                self._export_profile()
+            elif choice == 6:
+                self._import_profile()
+            elif choice == 7:
+                self._reset_fresh()
+            elif choice == 8:
+                self._show_changes()
+
+    def _save_profile(self):
+        print(Colors.cyan("Save Current Experiment Profile"))
+        name = input("Enter a name for this profile: ").strip()
+        if name:
+            self.profile_manager.save_profile(name)
+        else:
+            print(Colors.red("Profile name cannot be empty."))
+
+    def _list_profiles(self):
+        print(Colors.cyan("Saved Experiment Profiles:"))
+        print()
+
+        profiles = self.profile_manager.list_profiles()
+        if not profiles:
+            print(Colors.yellow("No saved profiles found."))
+        else:
+            for i, name in enumerate(profiles, 1):
+                meta = self.profile_manager.get_profile_metadata(name)
+                print(Colors.yellow(f"{i}) {name}"))
+                print(f"   Created: {meta.get('created_at', 'unknown')}")
+                print(
+                    f"   Method: {meta.get('method', 'unknown')} | Node: {meta.get('node_type', 'unknown')}"
+                )
+        print()
+        self.pause()
+
+    def _restore_profile(self):
+        print(Colors.cyan("Restore Experiment Profile"))
+        print()
+
+        profiles = self.profile_manager.list_profiles()
+        if not profiles:
+            print(Colors.yellow("No saved profiles found."))
+            return
+
+        idx = self.select_from_list(
+            profiles, f"Select profile to restore [0-{len(profiles)}]: "
+        )
+        if idx is None:
+            return
+
+        print(
+            Colors.yellow("This will overwrite your current experiment configuration.")
+        )
+        confirm = input("Continue? (y/n): ").strip().lower()
+        if confirm == "y":
+            self.profile_manager.restore_profile(profiles[idx])
+
+    def _delete_profile(self):
+        print(Colors.cyan("Delete Experiment Profile"))
+        print()
+
+        profiles = self.profile_manager.list_profiles()
+        if not profiles:
+            print(Colors.yellow("No saved profiles found."))
+            return
+
+        idx = self.select_from_list(
+            profiles, f"Select profile to delete [0-{len(profiles)}]: "
+        )
+        if idx is None:
+            return
+
+        print(
+            Colors.red(
+                f"WARNING: This will permanently delete profile '{profiles[idx]}'."
+            )
+        )
+        confirm = input("Are you sure? (y/n): ").strip().lower()
+        if confirm == "y":
+            self.profile_manager.delete_profile(profiles[idx])
+
+    def _export_profile(self):
+        print(Colors.cyan("Export Experiment Profile"))
+        print()
+
+        profiles = self.profile_manager.list_profiles()
+        if not profiles:
+            print(Colors.yellow("No saved profiles found. Save a profile first."))
+            return
+
+        idx = self.select_from_list(
+            profiles, f"Select profile to export [0-{len(profiles)}]: "
+        )
+        if idx is None:
+            return
+
+        self.profile_manager.export_profile(profiles[idx])
+
+    def _import_profile(self):
+        print(Colors.cyan("Import Experiment Profile"))
+        print()
+        print(Colors.cyan("Import options:"))
+        print(Colors.yellow("1) Import from exports directory"))
+        print(Colors.yellow("2) Import from custom path"))
+        print(Colors.yellow("0) Cancel"))
+
+        choice = self.get_choice("Select option [0-2]: ", range(0, 3))
+
+        if choice == 0:
+            return
+
+        if choice == 1:
+            exports = self.profile_manager.list_exports()
+            if not exports:
+                print(
+                    Colors.yellow(f"No export files found in {self.config.exports_dir}")
+                )
+                return
+
+            export_names = [f.name for f in exports]
+            idx = self.select_from_list(
+                export_names, f"Select file to import [0-{len(exports)}]: "
+            )
+            if idx is None:
+                return
+
+            self.profile_manager.import_profile(exports[idx])
+        else:
+            path = input("Enter the full path to the .tar.gz file: ").strip()
+            if path:
+                self.profile_manager.import_profile(Path(path))
+            else:
+                print(Colors.red("Path cannot be empty."))
+
+    def _reset_fresh(self):
+        print(Colors.red("Reset Experiment to Fresh State"))
+        print()
+        print(Colors.yellow("This will:"))
+        print("  - Reset all tracked directories to git HEAD state")
+        print("  - Remove any untracked files in experiment directories")
+        print("  - Disable all scripts in startexperiment.sh")
+        print()
+        print(
+            Colors.red(
+                "WARNING: This cannot be undone unless you have saved a profile!"
+            )
+        )
+
+        confirm = input("Are you sure you want to reset? (y/n): ").strip().lower()
+        if confirm == "y":
+            self.profile_manager.reset_to_fresh_state()
+
+    def _show_changes(self):
+        print()
+        self.profile_manager.show_current_changes()
+        print()
+        self.pause()
+
+    def run(self):
+        while True:
+            self.refresh_screen()
+            print(Colors.cyan("Select the type of experiment to configure:"))
+            print(Colors.yellow("1) Radio Experiments"))
+            print(Colors.yellow("2) Vehicle Experiments"))
+            print(Colors.yellow("3) Traffic Generation Experiments"))
+            print(Colors.yellow("4) Manage Experiment Profiles"))
+            print(Colors.yellow("0) Exit"))
+
+            choice = self.get_choice("Enter your choice [0-4]: ", range(0, 5))
+
+            if choice == 0:
+                print("Exiting experiment setup. Your settings have been saved.")
+                break
+            elif choice == 1:
+                self.run_radio_menu()
+            elif choice == 2:
+                self.run_vehicle_menu()
+            elif choice == 3:
+                self.run_traffic_menu()
+            elif choice == 4:
+                self.run_profile_menu()
+
+def main():
+    config = Config()
+    menu = Menu(config)
+
+    try:
+        menu.run()
+    except KeyboardInterrupt:
+        print("\n\nExiting...")
+        sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()

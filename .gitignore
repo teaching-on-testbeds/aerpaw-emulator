@@ -1,0 +1,25 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+results/*
+!results/.gitkeep
+logs/
+*.tlog
+*.log
+compose.local.yaml
+# binary and generated artifacts
+*.apk
+*.crash
+*.csv
+*.jar
+*.jpg
+*.jpeg
+*.gif
+*.kmz
+*.mgn
+*.png
+*.tar.xz
+*.view
+*.webp

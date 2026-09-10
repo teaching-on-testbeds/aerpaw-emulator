@@ -1,0 +1,27 @@
+.git
+.gitignore
+.pytest_cache
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+.venv
+results
+logs
+README.md
+tests
+# binary and generated artifacts
+*.apk
+*.crash
+*.csv
+*.jar
+*.jpg
+*.jpeg
+*.gif
+*.kmz
+*.log
+*.mgn
+*.png
+*.tar.xz
+*.tlog
+*.webp

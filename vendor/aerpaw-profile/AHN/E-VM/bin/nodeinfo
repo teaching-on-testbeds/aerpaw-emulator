@@ -1,0 +1,113 @@
+#!/bin/bash
+
+GREEN='\033[1;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[1;36m'
+MAGENTA='\033[1;35m'
+RED='\033[1;31m'
+RESET='\033[0m'
+
+print_section() {
+    printf "${CYAN}== %s ==${RESET}\n" "$1"
+}
+
+print_kv() {
+    local label="$1"
+    local value="$2"
+    if [ -z "$value" ]; then
+        value="Unknown"
+    fi
+    printf "${YELLOW}%s:${RESET} %s\n" "$label" "$value"
+}
+
+resolve_node_location() {
+    local node_type="$1"
+    local node_num="$2"
+    local nodes_string="$3"
+
+    if [ "$node_type" = "Portable" ]; then
+        echo "Dronepad"
+        return
+    fi
+
+    if [ "$node_type" = "Fixed" ]; then
+        if [ -n "$nodes_string" ] && [[ "$node_num" =~ ^[0-9]+$ ]]; then
+            IFS=' ' read -r -a nodes_array <<< "$nodes_string"
+            local idx=$((node_num - 1))
+            if [ "$idx" -ge 0 ] && [ "$idx" -lt "${#nodes_array[@]}" ]; then
+                echo "${nodes_array[$idx]}"
+                return
+            fi
+            echo "Unknown fixed node"
+            return
+        fi
+        echo "Unknown fixed node"
+        return
+    fi
+
+    if [ -n "${AP_EXPENV_THIS_CONTAINER_NODE_HOSTNAME:-}" ]; then
+        echo "${AP_EXPENV_THIS_CONTAINER_NODE_HOSTNAME}"
+        return
+    fi
+
+    echo "Unknown"
+}
+
+format_node_list() {
+    local nodes_string="$1"
+    if [ -z "$nodes_string" ]; then
+        echo "Not assigned"
+        return
+    fi
+    local index=1
+    IFS=' ' read -r -a nodes_array <<< "$nodes_string"
+    for node in "${nodes_array[@]}"; do
+        printf "  - Node %d: %s\n" "$index" "$node"
+        index=$((index + 1))
+    done
+}
+
+main() {
+    local session_env="${AP_EXPENV_SESSION_ENV:-Unknown}";
+    local experiment_number="${AP_EXPENV_EXP_NUM:-Unknown}";
+    local node_type="${AP_EXPENV_THIS_CONTAINER_NODE_TYPE:-Unknown}";
+    local node_num="${AP_EXPENV_THIS_CONTAINER_EXP_NODE_NUM:-Unknown}";
+    local nodes_string="${AP_EXPENV_SET_NODES:-}";
+    local vehicle_type="${AP_EXPENV_THIS_CONTAINER_NODE_VEHICLE:-}";
+    local hostname="${AP_EXPENV_THIS_CONTAINER_NODE_HOSTNAME:-}";
+    local extra_role="${AP_EXPENV_THIS_CONTAINER_NODE_ROLE:-}";
+
+    local location
+    location=$(resolve_node_location "$node_type" "$node_num" "$nodes_string")
+
+    print_section "Node Information"
+    print_kv "Node Type" "$node_type"
+    print_kv "Node Number" "$node_num"
+    print_kv "Location" "$location"
+    print_kv "Hostname" "$hostname"
+    print_kv "Vehicle" "$vehicle_type"
+    if [ -n "$extra_role" ]; then
+        print_kv "Role" "$extra_role"
+    fi
+    echo
+
+    print_section "Experiment Context"
+    print_kv "Session Environment" "$session_env"
+    print_kv "Experiment Number" "$experiment_number"
+    if [ -n "$nodes_string" ]; then
+        printf "${YELLOW}Assigned Nodes:${RESET}\n"
+        format_node_list "$nodes_string"
+        echo
+    else
+        print_kv "Assigned Nodes" "Not assigned"
+    fi
+
+    if [ -n "${AP_EXPENV_SESSION_START_TIME:-}" ]; then
+        print_kv "Session Start" "${AP_EXPENV_SESSION_START_TIME}"
+    fi
+    if [ -n "${AP_EXPENV_SESSION_END_TIME:-}" ]; then
+        print_kv "Session End" "${AP_EXPENV_SESSION_END_TIME}"
+    fi
+}
+
+main "$@"

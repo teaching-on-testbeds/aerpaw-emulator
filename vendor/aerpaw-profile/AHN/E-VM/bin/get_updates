@@ -1,0 +1,152 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_DIR="${AERPAW_DEV_REPO_DIR:-/root/AERPAW-Dev}"
+EXPERIMENT_ENV_FILE="${AERPAW_EXPERIMENT_ENV_FILE:-/root/.ap-set-experiment-env.sh}"
+
+if [[ -f "$EXPERIMENT_ENV_FILE" ]]; then
+  source "$EXPERIMENT_ENV_FILE"
+fi
+
+RELEASES_OWNER="AERPAW"
+RELEASES_REPO="AERPAW-Releases"
+RELEASES_BRANCH="main"
+RELEASES_BASE_URL="${AERPAW_RELEASES_BASE_URL:-https://raw.githubusercontent.com/${RELEASES_OWNER}/${RELEASES_REPO}/${RELEASES_BRANCH}}"
+
+fetch_release_metadata() {
+  local path="$1"
+  local url="${RELEASES_BASE_URL}/${path}"
+  local resp
+
+  if ! resp=$(curl -fsSL --retry 3 --connect-timeout 5 "$url" 2>&1); then
+    if [[ "${AERPAW_RELEASES_DEBUG:-0}" == "1" ]]; then
+      printf 'Failed to fetch %s: %s\n' "$url" "$resp" >&2
+    fi
+    return 0
+  fi
+
+  printf '%s\n' "$resp"
+}
+
+get_release_field() {
+  local path="$1"
+  local field="$2"
+  local resp
+  resp=$(fetch_release_metadata "$path") || return 0
+  printf '%s\n' "$resp" \
+    | sed -n "s/.*\"${field}\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p" \
+    | head -n1
+}
+
+git config --global --add safe.directory "$REPO_DIR"
+
+local_sha=$(git -C "${REPO_DIR}" rev-parse HEAD)
+chem_version=$(pychem --version 2>/dev/null || echo "")
+uhd_version=$(uhd_config_info --version 2>/dev/null || echo "")
+
+dev_latest_path="aerpaw-dev-latest.json"
+dev_latest_tag=$(get_release_field "$dev_latest_path" "tag_name")
+dev_release_sha=$(get_release_field "$dev_latest_path" "commit_hash")
+
+if [[ -n "$dev_latest_tag" && -z "$dev_release_sha" ]]; then
+  dev_release_sha=$(git -C "${REPO_DIR}" rev-parse -q --verify "refs/tags/${dev_latest_tag}^{commit}" 2>/dev/null || true)
+fi
+
+if [[ -z "$dev_latest_tag" ]]; then
+  echo "Failed to get latest AERPAW-Dev release information"
+elif [[ -z "$dev_release_sha" ]]; then
+  echo "AERPAW-Dev: update available (${dev_latest_tag})"
+elif git -C "${REPO_DIR}" merge-base --is-ancestor "$dev_release_sha" "$local_sha" 2>/dev/null; then
+  echo "AERPAW-Dev: up to date (${dev_latest_tag})"
+else
+  echo "AERPAW-Dev: update available (${dev_latest_tag})"
+fi
+
+extract_version_token() {
+  printf '%s\n' "$1" \
+    | tr -d '\r' \
+    | grep -Eo 'v?[0-9]+(\.[0-9]+){1,3}([.-][A-Za-z0-9]+)*' \
+    | head -n1 || true
+}
+
+normalize_version_token() {
+  local token="$1"
+  token=$(printf '%s' "$token" | tr -d '\r')
+  token=$(printf '%s' "$token" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')
+  token=$(printf '%s' "$token" | sed -E 's/^[vV]([0-9])/\1/')
+  printf '%s\n' "$token"
+}
+
+compare_version_tokens() {
+  local lhs="$1"
+  local rhs="$2"
+  local first
+
+  if [[ "$lhs" == "$rhs" ]]; then
+    echo 0
+    return
+  fi
+
+  first=$(printf '%s\n%s\n' "$lhs" "$rhs" | sort -V | head -n1)
+  if [[ "$first" == "$lhs" ]]; then
+    echo -1
+  else
+    echo 1
+  fi
+}
+
+compare_local_to_latest() {
+  local component="$1"
+  local latest_tag="$2"
+  local local_version_raw="$3"
+  local local_token
+  local latest_token
+  local local_norm
+  local latest_norm
+  local cmp
+
+  local_token=$(extract_version_token "$local_version_raw")
+  latest_token=$(extract_version_token "$latest_tag")
+
+  if [[ -z "$latest_tag" ]]; then
+    echo "Failed to get latest ${component} release information"
+    return
+  fi
+
+  if [[ -z "$local_version_raw" ]]; then
+    echo "Unable to determine local ${component} version"
+    return
+  fi
+
+  if [[ -z "$local_token" ]]; then
+    local_token="$local_version_raw"
+  fi
+  if [[ -z "$latest_token" ]]; then
+    latest_token="$latest_tag"
+  fi
+
+  local_norm=$(normalize_version_token "$local_token")
+  latest_norm=$(normalize_version_token "$latest_token")
+
+  if [[ -z "$local_norm" || -z "$latest_norm" ]]; then
+    echo "${component}: unable to compare versions (${local_version_raw} vs ${latest_tag})"
+    return
+  fi
+
+  cmp=$(compare_version_tokens "$local_norm" "$latest_norm")
+
+  if [[ "$cmp" -ge 0 ]]; then
+    echo "${component}: up to date (${local_token})"
+  elif [[ "$cmp" -lt 0 ]]; then
+    echo "${component}: update available (${local_token} -> ${latest_tag})"
+  fi
+}
+
+chem_latest_path="chem-latest.json"
+uhd_latest_path="uhd-aerpaw-latest.json"
+
+chem_latest_tag=$(get_release_field "$chem_latest_path" "tag_name")
+uhd_latest_tag=$(get_release_field "$uhd_latest_path" "tag_name")
+
+compare_local_to_latest "Channel Emulator" "$chem_latest_tag" "$chem_version"
+compare_local_to_latest "V-USRP UHD driver" "$uhd_latest_tag" "$uhd_version"

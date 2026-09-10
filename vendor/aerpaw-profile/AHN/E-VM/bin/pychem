@@ -1,0 +1,204 @@
+#!/usr/bin/env python3
+
+import socket
+import json
+import os
+import argparse
+
+MAX_JSON_LENGTH = 4096
+
+class CHEM:
+    def __init__(self, addr=""):
+        if addr == "":
+            env_addr = os.getenv("AP_EXPENV_CHEMVM_XE")
+            self.addr = env_addr if env_addr else "localhost"
+            self.port = 5000
+        else:
+            self.addr = addr
+            self.port = 5000
+
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.socket.settimeout(2)
+
+        self.connect()
+
+        self.nodes = {}
+        self.channels = {}
+
+    def disconnect(self):
+        self.socket.disconnect(self.addr)
+
+    def connect(self):
+        try:
+            self.socket.connect((self.addr, self.port))
+        except Exception as e:
+            print(f"Error while connecting to {self.addr}:{self.port}. Detail: {e}")
+
+        print("Connected")
+
+    def reconnect(self):
+        self.disconnect()
+        self.connect()
+
+    def getNodes(self):
+        body = {"CMD": "RETURN_NODES"}
+        try:
+            _body = json.dumps(body).encode("utf-8") + b"\n"
+            self.socket.sendall(_body)
+
+            response = self.socket.recv(MAX_JSON_LENGTH).decode("utf-8").strip()
+            if response == "":
+                print("CHEM is empty!")
+                return
+            self.nodes = json.loads(response)
+            print(self.nodes)
+        except Exception as e:
+            print(f"ERROR while requesting the node information. Detail : {e}")
+            return False
+
+        return True
+
+    def getChannels(self):
+        body = {"CMD": "RETURN_CHANNELS"}
+        try:
+            self.socket.send_json(body + b"\n")
+            self.channels = json.loads(self.socket.recv_string())
+            print(self.channels)
+        except Exception as e:
+            print(f"ERROR while requesting the channel information. Detail : {e}")
+            return False
+
+        return True
+
+    def getIndividualChannels(self):
+        body = {"CMD": "RETURN_IND_CHANNELS"}
+        try:
+            self.socket.send_json(body)
+            self.channels = json.loads(self.socket.recv_string())
+            print(self.channels)
+        except Exception as e:
+            print(
+                f"ERROR while requesting the individual channel information. Detail : {e}"
+            )
+            return False
+
+        return True
+
+    def change_channel_coeffs(self, coeff, freq, chName):
+        body = {"CMD": "CHG_COEFF", "freq": freq, "chName": chName, "coeff": coeff}
+
+        try:
+            self.socket.send_json(body)
+            result = json.loads(self.socket.recv())
+            print(result)
+            return True
+        except Exception as e:
+            print(
+                f"ERROR while requesting changeo of channel coefficients. Detail : {e}"
+            )
+            return False
+
+    def changePathloss(self, freq, plModel, groundRef=-1):
+        body = {"CMD": "CHG_PL", "freq": freq}
+        result = ""
+        try:
+            if plModel == "FREE_SPACE":
+                body["plMode"] = "FREE_SPACE"
+                self.socket.send_json(body)
+                result = json.loads(self.socket.recv())
+            elif plModel == "2_RAY":
+                body["plMode"] = "2RAY"
+                body["groundCoeff"] = groundRef
+                self.socket.send_json(body)
+                result = json.loads(self.socket.recv())
+            elif plModel == "NONE":
+                body["plMode"] = "NONE"
+                self.socket.send_json(body)
+                result = json.loads(self.socket.recv())
+            else:
+                print("GIVEN MODE IS NOT SUPPORTED")
+                return False
+            print(result)
+            return True
+        except Exception as e:
+            print(f"ERROR while requesting changeo of Path Loss. Detail : {e}")
+            return False
+
+    def changeAntenna(self, nodeId, antType):
+        body = {"CMD": "CHG_ANT", "freq": nodeId, "coeff": antType}
+
+        try:
+            self.socket.send_json(body)
+            result = json.loads(self.socket.recv())
+            print(result)
+            return True
+        except Exception as e:
+            print(f"ERROR while requesting change of Antenna. Detail : {e}")
+            return False
+
+    def changeNoiseModel(self, noiseModel, pwr, freq, chName):
+        body = {
+            "CMD": "CHG_NOISE_MDL",
+            "noiseModel": noiseModel,
+            "pwr": pwr,
+            "freq": freq,
+            "chName": chName,
+        }
+
+        try:
+            self.socket.send_json(body)
+            result = json.loads(self.socket.recv())
+            print(result)
+        except Exception as e:
+            print(f"ERROR while requesting the change of Noise Model. Detail : {e}")
+            return False
+
+    def updateShadowingFactor(self, std):
+        body = {"CMD": "UPD_SHADOW_STD", "std": int(std)}
+        try:
+            _body = json.dumps(body).encode("utf-8") + b"\n"
+            self.socket.sendall(_body)
+
+            response = self.socket.recv(MAX_JSON_LENGTH).decode("utf-8").strip()
+            print(response)
+        except Exception as e:
+            print(f"ERROR while requesting the node information. Detail : {e}")
+            return False
+
+    def getShadowingFactor(self):
+        body = {"CMD": "GET_SHADOW_STD"}
+        try:
+            _body = json.dumps(body).encode("utf-8") + b"\n"
+            self.socket.sendall(_body)
+
+            response = self.socket.recv(MAX_JSON_LENGTH).decode("utf-8").strip()
+            print(response)
+        except Exception as e:
+            print(f"ERROR while requesting the node information. Detail : {e}")
+            return False
+
+def show_help():
+    print("No arguments provided. Use --help for usage information.")
+
+if __name__ == "__main__": 
+    parser = argparse.ArgumentParser(description="Command-line tool for ACHEM to control channel emulator.")
+    subparsers = parser.add_subparsers(dest="command")
+    
+    shadowing_parser = subparsers.add_parser("shadowing", help="Manage shadowing factor")
+    shadowing_parser.add_argument("--update", type=int, help="Update the shadowing factor with a new value.")
+    shadowing_parser.add_argument("--get", action="store_true", help="Get the current shadowing factor.")
+
+    args = parser.parse_args()
+    ch = CHEM()
+
+    if args.command is None:
+        show_help()
+    elif args.command == "shadowing":
+        if args.get:
+            ch.getShadowingFactor()
+        if args.update is not None:
+            ch.updateShadowingFactor(args.update)
+            ch.getShadowingFactor()
+    else: 
+        print("Invalid usage")
+        show_help()

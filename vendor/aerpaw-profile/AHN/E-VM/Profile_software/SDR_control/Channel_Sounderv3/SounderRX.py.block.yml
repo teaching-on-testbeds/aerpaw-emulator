@@ -1,0 +1,68 @@
+id: SounderRX
+label: SounderRX
+category: '[GRC Hier Blocks]'
+
+parameters:
+-   id: fcut
+    label: Cutoff Freq
+    dtype: real
+    default: 62.5e3
+    hide: none
+-   id: freq
+    label: Frequency
+    dtype: real
+    default: '0'
+    hide: none
+-   id: ftrans
+    label: Transition Width
+    dtype: real
+    default: 20e3
+    hide: none
+-   id: gainrx
+    label: gainrx
+    dtype: real
+    default: '30'
+    hide: none
+-   id: samp_rate
+    label: Sample Rate
+    dtype: real
+    default: 2e6
+    hide: none
+-   id: sps
+    label: sps
+    dtype: raw
+    default: '32'
+    hide: none
+
+inputs:
+-   label: in
+    dtype: complex
+    vlen: 1
+
+outputs:
+-   label: out0
+    dtype: float
+    vlen: 1
+-   label: out1
+    dtype: float
+    vlen: 1
+
+templates:
+    imports: 'from SounderRX import SounderRX  # grc-generated hier_block'
+    make: "SounderRX(\n    fcut=${ fcut },\n    freq=${ freq },\n    ftrans=${ ftrans\
+        \ },\n    gainrx=${ gainrx },\n    samp_rate=${ samp_rate },\n    sps=${ sps\
+        \ },\n)"
+    callbacks:
+    - set_fcut(${ fcut })
+    - set_freq(${ freq })
+    - set_ftrans(${ ftrans })
+    - set_gainrx(${ gainrx })
+    - set_samp_rate(${ samp_rate })
+    - set_sps(${ sps })
+
+documentation: 'Ozgur Ozdemir
+
+    /root/.grc_gnuradio/SounderRX.py'
+grc_source: /root/Profiles/SDR_control/Channel_Sounderv3/SounderRX.grc
+
+file_format: 1

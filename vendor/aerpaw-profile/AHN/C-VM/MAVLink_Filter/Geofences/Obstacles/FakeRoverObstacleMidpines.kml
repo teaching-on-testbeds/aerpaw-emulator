@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2" xmlns:kml="http://www.opengis.net/kml/2.2" xmlns:atom="http://www.w3.org/2005/Atom">
+<Document>
+	<name>FakeRoverObstacleMidpines</name>
+	<gx:CascadingStyle kml:id="__managed_style_1C07EFE72A1A307D32D8">
+		<Style>
+			<IconStyle>
+				<scale>1.2</scale>
+				<Icon>
+					<href>https://earth.google.com/earth/rpc/cc/icon?color=1976d2&amp;id=2000&amp;scale=4</href>
+				</Icon>
+				<hotSpot x="64" y="128" xunits="pixels" yunits="insetPixels"/>
+			</IconStyle>
+			<LabelStyle>
+			</LabelStyle>
+			<LineStyle>
+				<color>ff2dc0fb</color>
+				<width>6</width>
+			</LineStyle>
+			<PolyStyle>
+				<color>40ffffff</color>
+			</PolyStyle>
+			<BalloonStyle>
+				<displayMode>hide</displayMode>
+			</BalloonStyle>
+		</Style>
+	</gx:CascadingStyle>
+	<gx:CascadingStyle kml:id="__managed_style_06F49B981C1A307D32D8">
+		<Style>
+			<IconStyle>
+				<Icon>
+					<href>https://earth.google.com/earth/rpc/cc/icon?color=1976d2&amp;id=2000&amp;scale=4</href>
+				</Icon>
+				<hotSpot x="64" y="128" xunits="pixels" yunits="insetPixels"/>
+			</IconStyle>
+			<LabelStyle>
+			</LabelStyle>
+			<LineStyle>
+				<color>ff2dc0fb</color>
+				<width>4</width>
+			</LineStyle>
+			<PolyStyle>
+				<color>40ffffff</color>
+			</PolyStyle>
+			<BalloonStyle>
+				<displayMode>hide</displayMode>
+			</BalloonStyle>
+		</Style>
+	</gx:CascadingStyle>
+	<StyleMap id="__managed_style_0511F369BA1A307D32D7">
+		<Pair>
+			<key>normal</key>
+			<styleUrl>#__managed_style_06F49B981C1A307D32D8</styleUrl>
+		</Pair>
+		<Pair>
+			<key>highlight</key>
+			<styleUrl>#__managed_style_1C07EFE72A1A307D32D8</styleUrl>
+		</Pair>
+	</StyleMap>
+	<Placemark id="09DBE4CFDC1A307D32D7">
+		<name>Polygon</name>
+		<LookAt>
+			<longitude>-78.69636278218657</longitude>
+			<latitude>35.72732691575649</latitude>
+			<altitude>108.5299856738791</altitude>
+			<heading>0</heading>
+			<tilt>0</tilt>
+			<gx:fovy>35</gx:fovy>
+			<range>111.1819359032415</range>
+			<altitudeMode>absolute</altitudeMode>
+		</LookAt>
+		<styleUrl>#__managed_style_0511F369BA1A307D32D7</styleUrl>
+		<Polygon>
+			<outerBoundaryIs>
+				<LinearRing>
+					<coordinates>
+						-78.6959909520274,35.72735229622958,110.5033674883683 -78.69597577439434,35.7273893878752,110.631889466694 -78.69617774420514,35.72743866062623,109.3591464876247 -78.69629241709603,35.72745405972598,108.708216020316 -78.69643680548879,35.72746281702948,108.3260643562245 -78.69643795555669,35.72742770120527,108.309238059925 -78.69630715289439,35.72742460897687,108.6718547975993 -78.69619115763984,35.72740941098635,109.2778901021661 -78.6959909520274,35.72735229622958,110.5033674883683 
+					</coordinates>
+				</LinearRing>
+			</outerBoundaryIs>
+		</Polygon>
+	</Placemark>
+</Document>
+</kml>

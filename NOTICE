@@ -1,0 +1,46 @@
+# NOTICE
+
+This project includes software and materials that originated in the AERPAW
+project's E-VM software profile and aerpawlib vehicle control library.
+
+## AERPAW E-VM materials
+
+The following directories contain material derived from the AERPAW E-VM
+(`AHN/E-VM`) and C-VM (`AHN/C-VM`) software trees:
+
+- `vendor/aerpaw-profile/AHN/E-VM/Profile_software/`
+- `vendor/aerpaw-profile/AHN/E-VM/bin/`
+- `vendor/aerpaw-profile/AHN/C-VM/MAVLink_Filter/Geofences/`
+
+These were copied from the AERPAW project development repository and are
+retained here so that AERPAW-style `aerpawlib` experiment scripts and the
+AERPAW profile filesystem layout (start/stop scripts, `bin` helpers, and
+geofence definitions) remain compatible with this digital twin deployment.
+
+Binary and generated artifacts from the original tree (APK builds, telemetry
+logs, radio captures, result data, images, and bytecode caches) have been
+removed. Only source code, configuration, and data files that are exercised by
+the emulator remain.
+
+The AERPAW project is developed by the AERPAW team at North Carolina State
+University: https://aerpaw.org/
+
+## aerpawlib
+
+`vendor/aerpawlib/` contains a copy of the `aerpawlib` package as used in the
+AERPAW E-VM profile at the time this project was developed. The current
+public `aerpawlib` release (github.com/AERPAW/aerpawlib) differs substantially
+from this copy; this project intentionally vendors the version that matches
+the E-VM profile layout.
+
+## Other third-party components
+
+The Docker images build from public upstream sources:
+
+- ArduPilot SITL (forked at github.com/morzack/ardupilot, used for the
+  `aerpaw-4.3.6` vehicle branch)
+- MAVLink Router (github.com/mavlink-router/mavlink-router)
+- dronekit-python (forked at github.com/morzack/dronekit-python)
+
+Of these, ArduPilot is licensed under the GNU General Public License (GPLv3).
+See the upstream repositories for their respective license terms.

@@ -1,0 +1,23 @@
+#!/bin/bash
+
+# Resets the CHEM-VM by sending a restart command.
+# This script is intended to be run on an E-VM.
+
+source /root/.ap-set-experiment-env.sh 
+
+V_FLAG=""
+if [ "$1" == "-v" ]; then
+  V_FLAG="-v"
+fi
+
+CHEM_IP=$AP_EXPENV_CHEMVM_XE
+
+# Check if CHEM_IP is set
+if [ -z "$CHEM_IP" ]; then
+    echo "Error: AP_EXPENV_CHEMVM_XE is not set. Cannot determine CHEM-VM IP."
+    exit 1
+fi
+
+echo "Sending reset command to CHEM..."
+python3 /root/AERPAW-Dev/DCS/Emulation/RemoteControl/reset.py --ips "${CHEM_IP}" $V_FLAG
+echo "Reset is done."

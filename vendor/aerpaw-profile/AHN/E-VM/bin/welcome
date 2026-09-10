@@ -1,0 +1,201 @@
+#!/bin/bash
+
+# Run once per container start
+if [ -f "/tmp/.aerpaw_welcome_run" ]; then
+    exit
+fi
+touch "/tmp/.aerpaw_welcome_run"
+
+GREEN='\033[1;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[1;36m'
+MAGENTA='\033[1;35m'
+RED='\033[1;31m'
+RESET='\033[0m'
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+software_root="/root/AERPAW-Dev"
+
+collect_screen_sessions() {
+    experiment_status="Screen utility not available."
+    session_lines=""
+
+    if command -v screen >/dev/null 2>&1; then
+        screen_output=$(screen -ls 2>&1)
+        screen_status=$?
+
+        if echo "$screen_output" | grep -qi "No Sockets found"; then
+            experiment_status="No running experiment sessions detected."
+            return
+        fi
+
+        if [ $screen_status -ne 0 ]; then
+            experiment_status="Unable to inspect screen sessions ($(echo "$screen_output" | tr -d '\r\n'))."
+            return
+        fi
+
+        session_lines=$(echo "$screen_output" | awk '/\t/ {sub(/^[[:space:]]+/, ""); print "- " $0}')
+        if [ -n "$session_lines" ]; then
+            experiment_status="Active sessions listed below."
+        else
+            experiment_status="No active experiment sessions reported."
+        fi
+    fi
+}
+
+ensure_git_safe_directory() {
+    if ! command -v git >/dev/null 2>&1; then
+        return
+    fi
+
+    if git config --global --get-all safe.directory 2>/dev/null | grep -Fx "$software_root" >/dev/null 2>&1; then
+        return
+    fi
+
+    git config --global --add safe.directory "$software_root" >/dev/null 2>&1
+}
+
+check_repo_status() {
+    repo_status="${RED}Software status unavailable.${RESET}"
+    repo_headline=""
+
+    if ! command -v git >/dev/null 2>&1; then
+        repo_status="${RED}Git not installed.${RESET}"
+        return
+    fi
+
+    repo_root="$software_root"
+
+    if [ ! -d "$repo_root/.git" ]; then
+        repo_status="${RED}Software repository not found at $repo_root.${RESET}"
+        return
+    fi
+
+    if ! git -C "$repo_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        repo_status="${RED}Invalid git repository at $repo_root.${RESET}"
+        return
+    fi
+
+    ensure_git_safe_directory
+
+    if ! git -C "$repo_root" fetch --quiet --all >/dev/null 2>&1; then
+        fetch_note=" ${YELLOW}(remote info not refreshed)${RESET}"
+    else
+        fetch_note=""
+    fi
+
+    headline=$(git -C "$repo_root" status -sb 2>/dev/null | head -n1)
+    porcelain=$(git -C "$repo_root" status --porcelain 2>/dev/null)
+
+    if [ -z "$headline" ]; then
+        repo_status="${RED}Unable to read software status.${RESET}"
+        return
+    fi
+
+    if [ -n "$porcelain" ]; then
+        cleanliness="${RED}working tree has local changes${RESET}"
+    else
+        cleanliness="${GREEN}working tree clean${RESET}"
+    fi
+
+    upstream=$(git -C "$repo_root" rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null || true)
+
+    if [ -z "$upstream" ]; then
+        sync_state="${YELLOW}no upstream tracking branch${RESET}"
+    else
+        ahead=$(printf '%s\n' "$headline" | sed -n 's/.*ahead \([0-9]\+\).*/\1/p')
+        behind=$(printf '%s\n' "$headline" | sed -n 's/.*behind \([0-9]\+\).*/\1/p')
+        if [ -n "$ahead" ] && [ -n "$behind" ]; then
+            sync_state="${YELLOW}diverged (ahead $ahead, behind $behind)${RESET}"
+        elif [ -n "$ahead" ]; then
+            sync_state="${YELLOW}ahead by $ahead${RESET}"
+        elif [ -n "$behind" ]; then
+            sync_state="${YELLOW}behind by $behind${RESET}"
+        else
+            sync_state="${GREEN}up-to-date with $upstream${RESET}"
+        fi
+    fi
+
+    repo_status="$cleanliness; $sync_state$fetch_note"
+    repo_headline="$headline"
+}
+
+session_env="${AP_EXPENV_SESSION_ENV:-}"
+node_num="${AP_EXPENV_THIS_CONTAINER_EXP_NODE_NUM:-}"
+node_type="${AP_EXPENV_THIS_CONTAINER_NODE_TYPE:-}"
+
+case "$session_env" in
+    Virtual)
+        welcome_msg="Welcome to your experiment at AERPAW Digital Twin."
+        ;;
+    Testbed)
+        welcome_msg="Welcome to your experiment in testbed mode."
+        ;;
+    Sandbox)
+        welcome_msg="Welcome to your experiment in sandbox mode."
+        ;;
+    *)
+        welcome_msg="Welcome to your experiment."
+        ;;
+esac
+
+location="Unknown"
+
+if [ "$node_type" = "Portable" ]; then
+    location="Dronepad"
+elif [ "$node_type" = "Fixed" ]; then
+    nodes_string="${AP_EXPENV_SET_NODES:-}"
+    if [ -n "$nodes_string" ] && [[ "$node_num" =~ ^[0-9]+$ ]]; then
+        IFS=' ' read -r -a nodes_array <<< "$nodes_string"
+        idx=$((node_num - 1))
+        if [ "$idx" -ge 0 ] && [ "$idx" -lt "${#nodes_array[@]}" ]; then
+            location="${nodes_array[$idx]}"
+        else
+            location="Unknown fixed node"
+        fi
+    else
+        location="Unknown fixed node"
+    fi
+fi
+
+if [ "$location" = "Unknown" ] && [ -n "${AP_EXPENV_THIS_CONTAINER_NODE_HOSTNAME:-}" ]; then
+    location="${AP_EXPENV_THIS_CONTAINER_NODE_HOSTNAME}"
+fi
+
+if [[ "$node_num" =~ ^[0-9]+$ ]]; then
+    node_num_output="$node_num"
+else
+    node_num_output="Unknown"
+fi
+
+collect_screen_sessions
+# check_repo_status
+
+# Execute get_updates and capture its output
+get_updates_output=$(/Users/anilgurses/Development/AERPAW-Dev/AHN/E-VM/bin/get_updates 2>&1)
+
+echo -e "${CYAN}+-------------------------------------+${RESET}"
+echo -e "${CYAN}|${RESET} ${MAGENTA}AERPAW Experiment Node Briefing${RESET} ${CYAN}|${RESET}"
+echo -e "${CYAN}+-------------------------------------+${RESET}"
+echo -e "${GREEN}${welcome_msg}${RESET}"
+echo -e "${YELLOW}├─ Node Number:${RESET} ${node_num_output}"
+echo -e "${YELLOW}├─ Node Location:${RESET} ${location}"
+echo -e "${YELLOW}├─ Experiment Sessions:${RESET} ${experiment_status}"
+if [ -n "$session_lines" ]; then
+    while IFS= read -r line; do
+        echo -e "   ${CYAN}${line}${RESET}"
+    done <<< "$session_lines"
+fi
+echo -e "${YELLOW}├─ Software Status:${RESET} ${repo_status}"
+if [ -n "$repo_headline" ]; then
+    echo -e "   ${CYAN}${repo_headline}${RESET}"
+fi
+echo -e "${YELLOW}└─ Update Status:${RESET}"
+while IFS= read -r line; do
+    echo -e "   ${CYAN}${line}${RESET}"
+done <<< "$get_updates_output"
+echo -e "${CYAN}Utilities:${RESET} Launch ${YELLOW}aerpawhelper${RESET} for help."
+echo -e "${CYAN}Docs:${RESET} ${MAGENTA}Sample Experiments${RESET} → https://sites.google.com/ncsu.edu/aerpaw-user-manual/6-sample-experiments-repository"
+echo -e "${CYAN}Docs:${RESET} ${MAGENTA}Environment Overview${RESET} → https://sites.google.com/ncsu.edu/aerpaw-user-manual/5-experiment-environment-hardware-and-software/5-1-wireless-and-vehicle-software"
+
+

@@ -1,0 +1,148 @@
+#!/bin/bash
+
+GREEN='\033[1;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[1;36m'
+MAGENTA='\033[1;35m'
+RED='\033[1;31m'
+RESET='\033[0m'
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+NODEINFO_SCRIPT="$SCRIPT_DIR/nodeinfo"
+SHOW_RESULTS_SCRIPT="$SCRIPT_DIR/show_results"
+EXPERIMENT_SETUP_SCRIPT="$SCRIPT_DIR/experiment_setup"
+PYCHEM_SCRIPT="/usr/local/bin/pychem"
+VUSRP_CONF_SCRIPT="/usr/local/bin/vusrp_configure"
+CHECKPLAN_SCRIPT="$SCRIPT_DIR/checkPlan.sh"
+SAVEPLAN_SCRIPT="$SCRIPT_DIR/savePlan.sh"
+RESET_SCRIPT="$SCRIPT_DIR/exp_reset"
+GET_UPDATES_SCRIPT="$SCRIPT_DIR/get_updates"
+
+START_EXPERIMENT_SCRIPT="/root/startexperiment.sh"
+RADIO_SCRIPT_PATH="./Radio/startRadio.sh"
+VEHICLE_SCRIPT_PATH="./Vehicle/startVehicle.sh"
+TRAFFIC_SCRIPT_PATH="./Traffic/startTraffic.sh"
+
+divider() {
+    printf "${CYAN}============================================${RESET}\n"
+}
+
+display_banner() {
+    echo -e "${GREEN}"
+    echo "      AERPAW Mission Console"
+    echo -e "${RESET}"
+}
+
+check_script_status() {
+    local script_name=$1
+    local script_path=$2
+    local status
+
+    if [ ! -f "$START_EXPERIMENT_SCRIPT" ]; then
+        printf "${RED}[?] %s status unavailable (missing %s)${RESET}\n" "$script_name" "$START_EXPERIMENT_SCRIPT"
+        return
+    fi
+
+    status="$(
+        awk -v path="$script_path" '
+            index($0, path) {
+                if ($0 ~ /^[[:space:]]*#/) {
+                    disabled = 1
+                } else {
+                    enabled = 1
+                }
+            }
+            END {
+                if (enabled) {
+                    print "enabled"
+                } else if (disabled) {
+                    print "disabled"
+                } else {
+                    print "missing"
+                }
+            }
+        ' "$START_EXPERIMENT_SCRIPT"
+    )"
+
+    case "$status" in
+        enabled)
+            printf "${GREEN}[✔] %s script enabled${RESET}\n" "$script_name"
+            ;;
+        disabled)
+            printf "${RED}[X] %s script disabled${RESET}\n" "$script_name"
+            ;;
+        *)
+            printf "${YELLOW}[?] %s script not referenced${RESET}\n" "$script_name"
+            ;;
+    esac
+}
+
+display_experiment_status() {
+    divider
+    printf "${MAGENTA}Experiment Script Status${RESET}\n"
+    check_script_status "Radio" "$RADIO_SCRIPT_PATH"
+    check_script_status "Vehicle" "$VEHICLE_SCRIPT_PATH"
+    check_script_status "Traffic" "$TRAFFIC_SCRIPT_PATH"
+}
+
+run_nodeinfo_snapshot() {
+    divider
+    if [ -x "$NODEINFO_SCRIPT" ]; then
+        "$NODEINFO_SCRIPT"
+    elif [ -f "$NODEINFO_SCRIPT" ]; then
+        bash "$NODEINFO_SCRIPT"
+    else
+        printf "${RED}Node information utility not found at %s${RESET}\n" "$NODEINFO_SCRIPT"
+    fi
+}
+
+print_utility() {
+    local label="$1"
+    local description="$2"
+    local path="$3"
+
+    local status_msg
+    local status_color
+    local status_output
+    if [ -x "$path" ]; then
+        status_msg="ready"
+        status_color="$GREEN"
+    elif [ -f "$path" ]; then
+        status_msg="present (set executable to run directly)"
+        status_color="$YELLOW"
+    else
+        status_msg="missing"
+        status_color="$RED"
+    fi
+
+    status_output="${status_color}${status_msg}${RESET}"
+    printf "  ${YELLOW}%-16s${RESET} - %s [%b]\n" "$label" "$description" "$status_output"
+}
+
+list_utilities() {
+    divider
+    printf "${MAGENTA}Available Utilities${RESET}\n"
+    echo
+    print_utility "experiment_setup" "Utility for configuring radio/vehicle/traffic scripts" "$EXPERIMENT_SETUP_SCRIPT"
+    print_utility "pychem" "Manage CHEM profiles and services" "$PYCHEM_SCRIPT"
+    print_utility "vusrp_configure" "Manage virtual USRP configuration" "$VUSRP_CONF_SCRIPT"
+    print_utility "show_results" "View latest experiment logs" "$SHOW_RESULTS_SCRIPT"
+    print_utility "nodeinfo" "Display node and experiment context" "$NODEINFO_SCRIPT"
+    print_utility "checkPlan.sh" "Inspect current waypoint plan" "$CHECKPLAN_SCRIPT"
+    print_utility "savePlan.sh" "Persist updated waypoint plan" "$SAVEPLAN_SCRIPT"
+    print_utility "exp_reset" "Resets the experiment environment" "$RESET_SCRIPT"
+    print_utility "get_updates" "Checks AERPAW-Dev repository for updates" "$GET_UPDATES_SCRIPT"
+    echo
+    printf "Run utilities at any directory with ${YELLOW}<name>${RESET}\n\n"
+    printf "${CYAN}Docs:${RESET} ${MAGENTA}Sample Experiments${RESET} → https://sites.google.com/ncsu.edu/aerpaw-user-manual/6-sample-experiments-repository\n"
+    printf "${CYAN}Docs:${RESET} ${MAGENTA}Environment Overview${RESET} → https://sites.google.com/ncsu.edu/aerpaw-user-manual/5-experiment-environment-hardware-and-software/5-1-wireless-and-vehicle-software\n"
+}
+
+main() {
+    display_banner
+    run_nodeinfo_snapshot
+    display_experiment_status
+    list_utilities
+}
+
+main "$@"

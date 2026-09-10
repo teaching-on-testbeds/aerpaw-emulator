@@ -1,0 +1,54 @@
+# OCUDU (srsRAN-based) gNB cell configuration for the AERPAW SISO 5G SA profile.
+#
+# ru_sdr.tx_gain, ru_sdr.rx_gain, cu_cp.amf.addr and cu_cp.amf.bind_addr are
+# overridden on the command line by startOCUDU-5G-SISO-GNB.sh - the values
+# below are just defaults if `gnb -c gnb.yaml` is run directly.
+#
+# Band/ARFCN/bandwidth/SCS match a verified OCUDU+srsUE reference config.
+# PLMN 00101 / TAC 7 match the AERPAW Open5GS core
+# (Helpers/open5gs_nr_core.yaml) and the old NSA NR carrier (Helpers/5G/rr5G.conf).
+
+cu_cp:
+  amf:
+    addr: 192.168.103.1
+    port: 38412
+    bind_addr: 192.168.103.2
+    supported_tracking_areas:
+      - tac: 7
+        plmn_list:
+          - plmn: "00101"
+            tai_slice_support_list:
+              - sst: 1
+
+ru_sdr:
+  device_driver: uhd
+  device_args: type=b200
+  srate: 23.04
+  tx_gain: 70
+  rx_gain: 40
+
+cell_cfg:
+  dl_arfcn: 368500
+  band: 3
+  channel_bandwidth_MHz: 20
+  common_scs: 15
+  plmn: "00101"
+  tac: 7
+  pci: 500
+  pdcch:
+    dedicated:
+      ss2_type: common
+      dci_format_0_1_and_1_1: false
+    common:
+      ss0_index: 0
+      coreset0_index: 12
+  prach:
+    prach_config_index: 1
+  pdsch:
+    mcs_table: qam64
+  pusch:
+    mcs_table: qam64
+
+log:
+  filename: stdout
+  all_level: info

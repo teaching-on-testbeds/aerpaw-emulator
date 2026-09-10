@@ -1,0 +1,18 @@
+version: 1
+experiment: 839
+
+# Every node gets one C-VM-like SITL/router service and one E-VM-like
+# experiment service. Add another node entry to add another pair.
+nodes:
+  - id: 1
+    vehicle: uav
+    home:
+      lat: 35.7274824
+      lon: -78.6962748
+      heading: 0
+  - id: 2
+    vehicle: ugv
+    home:
+      lat: 35.7273924
+      lon: -78.6962748
+      heading: 0
