@@ -4,25 +4,6 @@ This project runs AERPAW-style virtual vehicles with Docker Compose. Each node h
 
 The included topology creates a UAV as node 1 and a UGV as node 2. You can add any mix of UAV and UGV nodes in `topology.yaml`.
 
-## Install
-
-Run on an Ubuntu 22.04 or 24.04 `amd64` host:
-
-```bash
-sudo apt-get update
-sudo apt-get install -y curl git ca-certificates python3 python3-yaml
-
-curl -sSL https://get.docker.com/ | sudo sh
-sudo groupadd -f docker; sudo usermod -aG docker $USER
-```
-
-Log out and back in so the group change takes effect, then check Docker:
-
-```bash
-docker run --rm hello-world
-docker compose version
-```
-
 ## Start
 
 The first build downloads public source for ArduPilot, MAVLink Router, and DroneKit. It does not need a token.
