@@ -160,7 +160,8 @@ def render(topology: dict) -> dict:
         }
 
     cvm_endpoints = " ".join(
-        f"{_service_name(node['id'], node['vehicle'], 'cvm')}:5762" for node in nodes
+        f"{_service_name(node['id'], node['vehicle'], 'cvm')}:5762:{node['id']}"
+        for node in nodes
     )
     services["mavlink-gateway"] = {
         "build": {"context": ".", "dockerfile": "docker/cvm/Dockerfile"},

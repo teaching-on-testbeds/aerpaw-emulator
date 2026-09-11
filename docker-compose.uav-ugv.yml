@@ -1,0 +1,172 @@
+name: aerpaw-standalone-x0839
+services:
+  node1-uav-cvm:
+    build:
+      context: .
+      dockerfile: docker/cvm/Dockerfile
+    image: aerpaw-standalone-cvm:latest
+    container_name: C-VM-X0839-M1
+    hostname: c-vm-x0839-m1
+    environment:
+      AP_EXPENV_EXP_NUM: '839'
+      AP_EXPENV_NUM_NODES: '2'
+      AP_EXPENV_SESSION_ENV: Virtual
+      AP_EXPENV_SET_NODES: 0 0
+      AP_EXPENV_THIS_CONTAINER_EXP_NODE_NUM: '1'
+      AP_EXPENV_THIS_CONTAINER_NODE_TYPE: Portable
+      AP_EXPENV_THIS_CONTAINER_NODE_VEHICLE: vehicle_uav
+      AP_EXPENV_THIS_CONTAINER_NAME: C-VM-X0839-M1
+      AP_EXPENV_THIS_CONTAINER_ROLE: C-VM
+      EVM_SERVICE: node1-uav-evm
+      NODE_ID: '1'
+      SITL_HOME: 35.7274824,-78.6962748,0,0
+      SITL_SYSID: '1'
+      VEHICLE_TYPE: uav
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - test -r /run/standalone-sitl.pid && kill -0 "$(cat /run/standalone-sitl.pid)"
+        && test -r /run/standalone-mavlink-router.pid && kill -0 "$(cat /run/standalone-mavlink-router.pid)"
+      interval: 2s
+      timeout: 2s
+      retries: 60
+      start_period: 5s
+    init: true
+    networks:
+    - vehicle-net
+    stop_grace_period: 10s
+  node1-uav-evm:
+    build:
+      context: .
+      dockerfile: docker/evm/Dockerfile
+    image: aerpaw-standalone-evm:latest
+    container_name: E-VM-X0839-M1
+    hostname: e-vm-x0839-m1
+    depends_on:
+      node1-uav-cvm:
+        condition: service_started
+    environment:
+      AP_EXPENV_EXP_NUM: '839'
+      AP_EXPENV_NUM_NODES: '2'
+      AP_EXPENV_SESSION_ENV: Virtual
+      AP_EXPENV_SET_NODES: 0 0
+      AP_EXPENV_THIS_CONTAINER_EXP_NODE_NUM: '1'
+      AP_EXPENV_THIS_CONTAINER_NODE_TYPE: Portable
+      AP_EXPENV_THIS_CONTAINER_NODE_VEHICLE: vehicle_uav
+      AP_EXPENV_OEOCVM_XM: 127.0.0.1
+      AP_EXPENV_THIS_CONTAINER_NAME: E-VM-X0839-M1
+      AP_EXPENV_THIS_CONTAINER_ROLE: E-VM
+      CVM_SERVICE: node1-uav-cvm
+      AUTO_ARM: '1'
+      AUTO_ARM_CONNECTION: udp:0.0.0.0:14551
+      MAVLINK_CONNECTION: udp:0.0.0.0:14550
+      NODE_ID: '1'
+      SQUARE_SIZE: '10'
+      VEHICLE_TYPE: drone
+    init: true
+    networks:
+    - vehicle-net
+    volumes:
+    - ./experiments:/opt/standalone/experiments:ro
+    - ./results/839/node-1:/results
+  node2-ugv-cvm:
+    build:
+      context: .
+      dockerfile: docker/cvm/Dockerfile
+    image: aerpaw-standalone-cvm:latest
+    container_name: C-VM-X0839-M2
+    hostname: c-vm-x0839-m2
+    environment:
+      AP_EXPENV_EXP_NUM: '839'
+      AP_EXPENV_NUM_NODES: '2'
+      AP_EXPENV_SESSION_ENV: Virtual
+      AP_EXPENV_SET_NODES: 0 0
+      AP_EXPENV_THIS_CONTAINER_EXP_NODE_NUM: '2'
+      AP_EXPENV_THIS_CONTAINER_NODE_TYPE: Portable
+      AP_EXPENV_THIS_CONTAINER_NODE_VEHICLE: vehicle_ugv
+      AP_EXPENV_THIS_CONTAINER_NAME: C-VM-X0839-M2
+      AP_EXPENV_THIS_CONTAINER_ROLE: C-VM
+      EVM_SERVICE: node2-ugv-evm
+      NODE_ID: '2'
+      SITL_HOME: 35.7273924,-78.6962748,0,0
+      SITL_SYSID: '2'
+      VEHICLE_TYPE: ugv
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - test -r /run/standalone-sitl.pid && kill -0 "$(cat /run/standalone-sitl.pid)"
+        && test -r /run/standalone-mavlink-router.pid && kill -0 "$(cat /run/standalone-mavlink-router.pid)"
+      interval: 2s
+      timeout: 2s
+      retries: 60
+      start_period: 5s
+    init: true
+    networks:
+    - vehicle-net
+    stop_grace_period: 10s
+  node2-ugv-evm:
+    build:
+      context: .
+      dockerfile: docker/evm/Dockerfile
+    image: aerpaw-standalone-evm:latest
+    container_name: E-VM-X0839-M2
+    hostname: e-vm-x0839-m2
+    depends_on:
+      node2-ugv-cvm:
+        condition: service_started
+    environment:
+      AP_EXPENV_EXP_NUM: '839'
+      AP_EXPENV_NUM_NODES: '2'
+      AP_EXPENV_SESSION_ENV: Virtual
+      AP_EXPENV_SET_NODES: 0 0
+      AP_EXPENV_THIS_CONTAINER_EXP_NODE_NUM: '2'
+      AP_EXPENV_THIS_CONTAINER_NODE_TYPE: Portable
+      AP_EXPENV_THIS_CONTAINER_NODE_VEHICLE: vehicle_ugv
+      AP_EXPENV_OEOCVM_XM: 127.0.0.1
+      AP_EXPENV_THIS_CONTAINER_NAME: E-VM-X0839-M2
+      AP_EXPENV_THIS_CONTAINER_ROLE: E-VM
+      CVM_SERVICE: node2-ugv-cvm
+      AUTO_ARM: '1'
+      AUTO_ARM_CONNECTION: udp:0.0.0.0:14551
+      MAVLINK_CONNECTION: udp:0.0.0.0:14550
+      NODE_ID: '2'
+      SQUARE_SIZE: '10'
+      VEHICLE_TYPE: rover
+    init: true
+    networks:
+    - vehicle-net
+    volumes:
+    - ./experiments:/opt/standalone/experiments:ro
+    - ./results/839/node-2:/results
+  mavlink-gateway:
+    build:
+      context: .
+      dockerfile: docker/cvm/Dockerfile
+    image: aerpaw-standalone-cvm:latest
+    container_name: MAVLink-Gateway-X0839
+    hostname: mavlink-gateway-x0839
+    depends_on:
+      node1-uav-cvm:
+        condition: service_started
+      node2-ugv-cvm:
+        condition: service_started
+    environment:
+      CVM_ENDPOINTS: node1-uav-cvm:5762:1 node2-ugv-cvm:5762:2
+    entrypoint:
+    - /opt/standalone/docker/gateway/entrypoint.sh
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - nc -z 127.0.0.1 5760
+      interval: 2s
+      timeout: 2s
+      retries: 60
+      start_period: 5s
+    init: true
+    networks:
+    - vehicle-net
+    ports:
+    - 127.0.0.1:5760:5760
+networks:
+  vehicle-net:
+    driver: bridge

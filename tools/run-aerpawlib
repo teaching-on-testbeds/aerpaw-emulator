@@ -6,8 +6,13 @@ if [ "$#" -lt 1 ]; then
     exit 2
 fi
 
-: "${MAVLINK_CONNECTION:?MAVLINK_CONNECTION is required}"
 : "${VEHICLE_TYPE:?VEHICLE_TYPE is required}"
+if [ "$VEHICLE_TYPE" = "none" ]; then
+    # coordinators drive vehicles over zmq and hold no MAVLink link
+    : "${MAVLINK_CONNECTION:=none}"
+else
+    : "${MAVLINK_CONNECTION:?MAVLINK_CONNECTION is required}"
+fi
 
 script=$1
 shift
@@ -19,7 +24,20 @@ case "$VEHICLE_TYPE" in
     rover) prearm_mode=MANUAL ;;
 esac
 
-if [ "${AUTO_ARM:-1}" = "1" ]; then
+zmq_args=()
+if [ -n "${ZMQ_IDENTIFIER:-}" ]; then
+    zmq_args+=(--zmq-identifier "$ZMQ_IDENTIFIER")
+fi
+if [ -n "${ZMQ_PROXY_SERVER:-}" ]; then
+    zmq_args+=(--zmq-proxy-server "$ZMQ_PROXY_SERVER")
+fi
+
+arm_enabled=1
+if [ "$VEHICLE_TYPE" = "none" ] || [ "${AUTO_ARM:-1}" != "1" ]; then
+    arm_enabled=0
+fi
+
+if [ "$arm_enabled" = "1" ]; then
     arm_args=(
         python3 /opt/standalone/tools/auto_arm.py
         --connect "$arm_connection"
@@ -39,10 +57,11 @@ python3 /opt/standalone/tools/experiment_runner.py \
     --script "$script" \
     --vehicle "$VEHICLE_TYPE" \
     --connection "$MAVLINK_CONNECTION" \
-    "$@"
+    "${zmq_args[@]}" \
+    -- "$@"
 status=$?
 
-if [ "${AUTO_ARM:-1}" = "1" ]; then
+if [ "$arm_enabled" = "1" ]; then
     python3 /opt/standalone/tools/auto_arm.py \
         --connect "$arm_connection" \
         --timeout "$arm_timeout" \

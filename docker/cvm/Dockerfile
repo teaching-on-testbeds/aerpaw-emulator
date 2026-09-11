@@ -47,14 +47,16 @@ RUN git clone --branch "$MAVLINK_ROUTER_REF" --depth 1 --recurse-submodules \
     && ninja -C /tmp/mavlink-router/build install \
     && rm -rf /tmp/mavlink-router /var/lib/apt/lists/*
 
+RUN python3 -m pip install --no-cache-dir "pymavlink>=2.4.41,<3"
+
 COPY tools/generate_router_config.py /opt/standalone/tools/generate_router_config.py
 COPY docker/cvm/entrypoint.sh /opt/standalone/docker/cvm/entrypoint.sh
 COPY docker/gateway/entrypoint.sh /opt/standalone/docker/gateway/entrypoint.sh
-COPY docker/gateway/tcp_udp_bridge.py /opt/standalone/docker/gateway/tcp_udp_bridge.py
+COPY docker/gateway/mavlink_hub.py /opt/standalone/docker/gateway/mavlink_hub.py
 COPY docker/cvm/params /opt/standalone/docker/cvm/params
 
 RUN chmod +x /opt/standalone/docker/cvm/entrypoint.sh \
     /opt/standalone/docker/gateway/entrypoint.sh \
-    /opt/standalone/docker/gateway/tcp_udp_bridge.py
+    /opt/standalone/docker/gateway/mavlink_hub.py
 
 ENTRYPOINT ["/opt/standalone/docker/cvm/entrypoint.sh"]

@@ -22,9 +22,30 @@ def set_mode(master, mode: str, deadline: float) -> None:
     raise TimeoutError(f"vehicle did not enter {mode} mode")
 
 
+def wait_for_autopilot_heartbeat(master, timeout: float) -> None:
+    # mavutil.wait_heartbeat binds to the first HEARTBEAT it sees, which can be
+    # another ground station's sysid 255 broadcast; bind only to an autopilot.
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        heartbeat = master.recv_match(type="HEARTBEAT", blocking=True, timeout=2)
+        if heartbeat is None:
+            continue
+        if (
+            heartbeat.get_srcComponent() == mavutil.mavlink.MAV_COMP_ID_AUTOPILOT1
+            and heartbeat.autopilot == mavutil.mavlink.MAV_AUTOPILOT_ARDUPILOTMEGA
+        ):
+            master.target_system = heartbeat.get_srcSystem()
+            master.target_component = heartbeat.get_srcComponent()
+            master.mav_type = heartbeat.type
+            return
+    raise TimeoutError("no ArduPilot autopilot heartbeat received")
+
+
 def set_armed(connection: str, timeout: float, armed: bool, mode: str | None = None) -> None:
-    master = mavutil.mavlink_connection(connection)
-    master.wait_heartbeat(timeout=timeout)
+    # heartbeat=False so this short-lived tool never looks like a vehicle or
+    # another GCS to the other clients sharing the router endpoints
+    master = mavutil.mavlink_connection(connection, heartbeat=False)
+    wait_for_autopilot_heartbeat(master, timeout)
     deadline = time.monotonic() + timeout
     if mode:
         set_mode(master, mode, deadline)

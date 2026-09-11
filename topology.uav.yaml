@@ -1,0 +1,12 @@
+version: 1
+experiment: 841
+
+# Simplest stack: one UAV, no coordination. Use it for the no-ZMQ
+# demo_square experiment and for connecting QGroundControl to one vehicle.
+nodes:
+  - id: 1
+    vehicle: uav
+    home:
+      lat: 35.7274824
+      lon: -78.6962748
+      heading: 0
